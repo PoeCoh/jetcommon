@@ -22,9 +22,8 @@ pub fn zig(
         .zig,
     );
     if (ast.errors.len > 0) {
-        const tty = std.io.tty.detectConfig(std.fs.File.stderr());
-        var stderr_fw = std.fs.File.stderr().writer(&.{});
-        const writer = &stderr_fw.interface;
+        const tty = std.Io.tty.detectConfig(std.fs.File.stderr());
+        var writer = std.fs.File.stderr().writer(&.{}).interface;
 
         var it = std.mem.tokenizeScalar(u8, input, '\n');
         var line_number: usize = 1;
@@ -32,14 +31,15 @@ pub fn zig(
             const maybe_err = for (ast.errors) |err| {
                 if (ast.tokenLocation(0, err.token).line == line_number + 1) break err;
             } else null;
-            try tty.setColor(writer, if (maybe_err != null) .red else .cyan);
+            try tty.setColor(&writer, if (maybe_err != null) .red else .cyan);
             const error_message = if (maybe_err) |err| blk: {
-                var buf = std.ArrayList(u8).init(alloc);
-                const err_writer = buf.writer();
-                var new_interface = err_writer.adaptToNewApi().new_interface;
+                var buf: std.ArrayList(u8) = try .initCapacity(alloc, 0);
+                const err_writer = buf.writer(alloc);
+                var w_buf: [2]u8 = undefined;
+                var new_interface = err_writer.adaptToNewApi(&w_buf).new_interface;
                 try err_writer.writeAll(" // ");
                 try ast.renderError(err, &new_interface);
-                break :blk try buf.toOwnedSlice();
+                break :blk try buf.toOwnedSlice(alloc);
             } else "";
             try writer.print("{: <4} {s}{s}\n", .{
                 line_number,
@@ -48,10 +48,10 @@ pub fn zig(
             });
         }
         if (message) |msg| {
-            try tty.setColor(writer, .yellow);
+            try tty.setColor(&writer, .yellow);
             try writer.print("\n{s}\n", .{msg});
         }
-        try tty.setColor(writer, .reset);
+        try tty.setColor(&writer, .reset);
         return error.JetCommonInvalidZigCode;
     }
 
@@ -60,5 +60,5 @@ pub fn zig(
 
     try ast.render(allocator, &aw.writer, fixups);
 
-    return aw.getWritten();
+    return aw.written();
 }
